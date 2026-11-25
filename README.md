@@ -50,7 +50,6 @@
 - [A note about listening level](#a-note-about-listening-level)
 - [Repository layout](#repository-layout)
 - [Scientific context](#scientific-context)
-- [License](#license)
 
 ---
 
