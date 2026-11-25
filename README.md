@@ -514,13 +514,13 @@ New-Item -ItemType Directory -Force build | Out-Null
 
 cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 `
   /c /DMUSE_AVX_KERNEL /arch:AVX muse_perceptual.cpp `
-  /Fo:build/muse_es_avx.obj
+  /Fo:build/muse_avx.obj
 
 cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 `
-  /DMUSE_SELF_TEST muse_perceptual.cpp build/muse_es_avx.obj `
-  /Fe:build/muse_es_tests.exe
+  /DMUSE_SELF_TEST muse_perceptual.cpp build/muse_avx.obj `
+  /Fe:build/muse_tests.exe
 
-.\build\muse_es_tests.exe
+.\build\muse_tests.exe
 ```
 
 The plugin DLL build additionally needs the fetched `vst.h` include directory and the Windows libraries shown in `.github/workflows/build.yml`.
