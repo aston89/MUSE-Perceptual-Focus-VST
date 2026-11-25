@@ -42,7 +42,7 @@
 #include <cmath>
 #include <immintrin.h>
 
-extern "C" void muse_es_avx_make_bands(
+extern "C" void muse_avx_make_bands(
     int splitCount, int bandCount, float input,
     const float* b0, const float* b1, const float* b2,
     const float* a1, const float* a2,
@@ -75,7 +75,7 @@ extern "C" void muse_es_avx_make_bands(
     band[bandCount - 1] = input - low[splitCount - 1];
 }
 
-extern "C" void muse_es_avx_update_powers(
+extern "C" void muse_avx_update_powers(
     int bandCount, const float* bands, float* power,
     float attackAlpha, float releaseAlpha) noexcept {
     const __m256 attack = _mm256_set1_ps(attackAlpha);
@@ -126,12 +126,12 @@ extern "C" void muse_es_avx_update_powers(
 #endif
 #endif
 
-extern "C" void muse_es_avx_make_bands(
+extern "C" void muse_avx_make_bands(
     int splitCount, int bandCount, float input,
     const float* b0, const float* b1, const float* b2,
     const float* a1, const float* a2,
     float* z1, float* z2, float* low, float* band) noexcept;
-extern "C" void muse_es_avx_update_powers(
+extern "C" void muse_avx_update_powers(
     int bandCount, const float* bands, float* power,
     float attackAlpha, float releaseAlpha) noexcept;
 
@@ -1013,7 +1013,7 @@ private:
     void makeBands(ChannelState& ch, float input, const BandConfiguration& cfg) noexcept {
         const auto& f = cfg.filters;
         if (avxEnabled_) {
-            muse_es_avx_make_bands(cfg.splitCount, cfg.bandCount, input,
+            muse_avx_make_bands(cfg.splitCount, cfg.bandCount, input,
                 f.b0.data(), f.b1.data(), f.b2.data(), f.a1.data(), f.a2.data(),
                 ch.z1.data(), ch.z2.data(), ch.low.data(), ch.band.data());
             return;
@@ -1049,7 +1049,7 @@ private:
     void updateBandPowers(ChannelState& ch, int channel, const BandConfiguration& cfg) noexcept {
         const ChannelControl& control = channelControls_[static_cast<std::size_t>(channel)];
         if (avxEnabled_) {
-            muse_es_avx_update_powers(cfg.bandCount, ch.band.data(), ch.power.data(),
+            muse_avx_update_powers(cfg.bandCount, ch.band.data(), ch.power.data(),
                                        control.powerAttackAlpha, control.powerReleaseAlpha);
             return;
         }
@@ -1870,7 +1870,7 @@ constexpr int kEditorWidth = 1120;
 constexpr int kEditorHeight = 440;
 constexpr int kEditorFirstRowY = 112;
 constexpr int kEditorRowHeight = 39;
-constexpr wchar_t kEditorClassName[] = L"MUSE_ES_Perceptual_v13_Editor";
+constexpr wchar_t kEditorClassName[] = L"muse_Perceptual_v13_Editor";
 
 constexpr std::array<const wchar_t*, kParameterCount> kParameterNamesWide = {
     L"Focus Amount", L"Mask Sensitivity", L"Sigmoid Softness", L"Maximum Reduction",
