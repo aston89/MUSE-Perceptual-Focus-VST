@@ -1,38 +1,6 @@
 /*
- * MUSE Perceptual Focus v1.3.0-dev (AVX1, block-batched stereo workers, parallel CSR decisions)
- *
+ * MUSE Perceptual Focus v1.3.1 (AVX1, block-batched stereo workers, parallel CSR decisions)
  * Real-time, subtractive, preference-guided self-masking processor.
- *
- * Performance changes from v0.7:
- * - Two persistent channel workers process whole independent-mode host blocks;
- *   the host callback waits once per bounded block segment, not once per tick.
- * - Four persistent decision workers (two per channel) parallelize the 256/512
- *   band CSR decision stages without shared writes.
- * - Independent per-channel masking/gain state by default.
- * - User-adjustable detector refresh: 250-1500 Hz, default 1000 Hz, independent
- *   of the 32/64/128/256/512 spectral-analysis resolution.
- * - Gain attack has a lower bound derived from the current decision interval;
- *   continuous power-envelope detection remains sample-rate based.
- * - Continuous Stereo Link control: 0% independent, 100% shared gain curve.
- * - Optional AVX1 kernels selected by runtime CPU + OS-state detection.
- * - Baseline x64 path remains safe on CPUs without AVX1.
- * - Numeric entry fields and presets in the editor; refreshes are coalesced
- *   and event-driven rather than polled on every VST EditIdle callback.
- *
- * Performance changes from v0.6:
- * - Runtime resolution: 32 / 64 / 128 / 256 / 512 ERB analysis regions.
- * - Precomputed configurations for all five resolutions.
- * - Sparse Bark spreading rows (contributions below -55 dB omitted).
- * - Structure-of-arrays float filter bank to encourage compiler SIMD.
- * - Float sample/filter state; double precision retained for control maths.
- * - Filter/spreading configurations are prepared outside the audio callback.
- * - Compact CSR spreading tables retain only active masker links, with a
- *   transposed CSR view for race-free masker-centric evidence accumulation.
- * - Complex frequency-response regression checks cover engine-generated and
- *   representative synthetic fixed-gain profiles at maximum resolution.
- * - The audio callback only coordinates bounded jobs; no allocation, thread
- *   creation, or configuration rebuild occurs in the callback.
- *
  * Build the baseline source normally. Compile this same file once more with
  * /DMUSE_AVX_KERNEL /arch:AVX to produce the optional AVX1 kernel object.
  */
@@ -1857,7 +1825,7 @@ constexpr int32_t kVstEffectCanDo = 51;
 constexpr int32_t kVstEffectGetVstVersion = 58;
 constexpr int32_t kVstHostGetVstVersion = 1;
 constexpr int32_t kVstVersion24 = 2400;
-constexpr int32_t kPluginVersion = 1300;
+constexpr int32_t kPluginVersion = 1301;
 // The 15-parameter layout and normalized ranges are unchanged from v1.2;
 // retain MESA so existing host states remain compatible.
 constexpr int32_t kPluginUniqueId = static_cast<int32_t>(VST_FOURCC('M', 'E', 'S', 'A'));
@@ -2461,6 +2429,13 @@ private:
             p.body = 0.22; p.vocal = 0.62; p.presence = 0.42;
             p.articulation = 0.25; p.air = 0.08; p.focusWidthBark = 1.35;
             p.responsiveness = 0.72; p.resolutionMode = 1; p.detectorRateHz = 750.0; break;
+        case 8: // Baudelaire Choice: maximum-resolution, neutral-priority, fast response.
+            p.amount = 1.0; p.sensitivity = 1.0; p.softness = 1.0;
+            p.maximumReductionDb = 9.0; p.energyPreference = 0.50;
+            p.body = 0.50; p.vocal = 0.50; p.presence = 0.50;
+            p.articulation = 0.50; p.air = 0.50; p.focusWidthBark = 0.35;
+            p.responsiveness = 1.0; p.resolutionMode = 4; p.stereoLink = 0.0;
+            p.detectorRateHz = 1500.0; break;
         default: // Factory default: unchanged v1.0 parameter values.
             break;
         }
@@ -2495,11 +2470,12 @@ private:
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, 7, L"Dense Mix \u2014 512 bands / 750 Hz");
         AppendMenuW(menu, MF_STRING, 8, L"Low CPU \u2014 64 bands / 750 Hz");
+        AppendMenuW(menu, MF_STRING, 9, L"Baudelaire Choice \u2014 512 bands / 1500 Hz");
         RECT r{}; GetWindowRect(GetDlgItem(owner, kEditorPresetButtonId), &r);
         const UINT chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
             r.left, r.bottom, 0, owner, nullptr);
         DestroyMenu(menu);
-        if (chosen >= 1 && chosen <= 8) applyPreset(static_cast<int>(chosen) - 1);
+        if (chosen >= 1 && chosen <= 9) applyPreset(static_cast<int>(chosen) - 1);
     }
 
     void layoutControls(HWND w) noexcept {
@@ -2729,3 +2705,4 @@ VSTPluginMain(vst_host_callback_t callback) {
 #endif // MUSE_SELF_TEST
 
 #endif // MUSE_AVX_KERNEL
+
