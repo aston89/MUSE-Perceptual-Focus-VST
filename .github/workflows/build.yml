@@ -1,0 +1,88 @@
+name: MUSE Perceptual Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure MSVC x64
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Fetch clean-room VST2 interface headers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = Join-Path $env:RUNNER_TEMP 'vst2sdk'
+          git clone --depth 1 --branch v0.4.0 https://github.com/Xaymar/vst2sdk.git $sdk
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path (Join-Path $sdk 'include/vst.h'))) {
+            throw 'Expected VST2 interface header include/vst.h was not found.'
+          }
+
+      - name: Compile optional AVX1 kernels
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path build | Out-Null
+          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /c /DMUSE_AVX_KERNEL /arch:AVX muse_es_perceptual.cpp /Fo:build/muse_es_avx.obj
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'build/muse_es_avx.obj')) { throw 'AVX1 kernel object was not produced.' }
+
+      - name: Compile DSP regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host '=== MSVC DSP TEST COMPILATION ==='
+          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /DMUSE_SELF_TEST muse_es_perceptual.cpp build/muse_es_avx.obj /Fe:build/muse_es_tests.exe
+          $compileExit = $LASTEXITCODE
+          Write-Host "MSVC_COMPILE_EXIT=$compileExit"
+          if ($compileExit -ne 0) { exit $compileExit }
+          if (-not (Test-Path 'build/muse_es_tests.exe')) { throw 'MSVC did not produce the DSP test executable.' }
+
+      - name: Run DSP regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Write-Host '=== DSP REGRESSION TESTS START ==='
+          & .\build\muse_es_tests.exe
+          $testExit = $LASTEXITCODE
+          Write-Host "DSP_TEST_EXIT=$testExit"
+          if ($testExit -ne 0) { exit $testExit }
+
+      - name: Build VST2 x64 DLL
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sdk = Join-Path $env:RUNNER_TEMP 'vst2sdk'
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /LD /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I "$sdk\include" muse_es_perceptual.cpp build/muse_es_avx.obj /link /OUT:release/MUSE_ES_Perceptual.dll user32.lib comctl32.lib gdi32.lib
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify PE architecture and VST2 entry point
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = 'release/MUSE_ES_Perceptual.dll'
+          if (-not (Test-Path $dll)) { throw "DLL not found: $dll" }
+          $headers = (& dumpbin /headers $dll | Out-String)
+          if ($headers -notmatch '8664 machine') { throw 'DLL is not AMD64/PE32+.' }
+          $exports = (& dumpbin /exports $dll | Out-String)
+          if ($exports -notmatch 'VSTPluginMain') { throw 'VSTPluginMain export is missing.' }
+          Write-Host 'PE32+ AMD64 and VSTPluginMain export verified.'
+
+      - name: Upload VST2 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MUSE-ES-Perceptual-v1.3-AVX1-Windows-x64
+          path: release/MUSE_ES_Perceptual.dll
+          if-no-files-found: error
