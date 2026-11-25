@@ -581,10 +581,6 @@ MUSE uses established psychoacoustic ideas as foundations, then adds its own eng
 
 The ERB-spaced filter bank and Bark-domain spreading are psychoacoustically motivated. The exact target curves, preference combination, normalized masker attribution and attenuation budget are MUSE-specific design choices.
 
-## License
-
-**No license has been selected for MUSE in this repository snapshot.** Until a `LICENSE` file is added, do not assume that the licenses of CALP, ASIP, DeFatiguer or SpectralGravity apply to MUSE, and do not assume that this project grants permission to reuse or redistribute its source. The four related projects are separate repositories with their own licensing terms.
-
 ---
 
 <p align="center">
