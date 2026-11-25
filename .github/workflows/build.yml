@@ -34,7 +34,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path build | Out-Null
-          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /c /DMUSE_AVX_KERNEL /arch:AVX muse_es_perceptual.cpp /Fo:build/muse_es_avx.obj
+          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /c /DMUSE_AVX_KERNEL /arch:AVX muse_perceptual.cpp /Fo:build/muse_es_avx.obj
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path 'build/muse_es_avx.obj')) { throw 'AVX1 kernel object was not produced.' }
 
@@ -43,7 +43,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           Write-Host '=== MSVC DSP TEST COMPILATION ==='
-          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /DMUSE_SELF_TEST muse_es_perceptual.cpp build/muse_es_avx.obj /Fe:build/muse_es_tests.exe
+          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /DMUSE_SELF_TEST muse_perceptual.cpp build/muse_es_avx.obj /Fe:build/muse_es_tests.exe
           $compileExit = $LASTEXITCODE
           Write-Host "MSVC_COMPILE_EXIT=$compileExit"
           if ($compileExit -ne 0) { exit $compileExit }
@@ -65,7 +65,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $sdk = Join-Path $env:RUNNER_TEMP 'vst2sdk'
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /LD /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I "$sdk\include" muse_es_perceptual.cpp build/muse_es_avx.obj /link /OUT:release/MUSE_ES_Perceptual.dll user32.lib comctl32.lib gdi32.lib
+          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /LD /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I "$sdk\include" muse_perceptual.cpp build/muse_es_avx.obj /link /OUT:release/MUSE_ES_Perceptual.dll user32.lib comctl32.lib gdi32.lib
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify PE architecture and VST2 entry point
