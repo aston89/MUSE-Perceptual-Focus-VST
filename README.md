@@ -281,7 +281,7 @@ S(\Delta z)=15.81+7.5x-17.5\sqrt{1+x^2},\qquad x=\Delta z+0.474
 
 where \(\Delta z\) is the Bark-distance between a target region and a candidate masker. Contributions below **−55 dB** are omitted from the sparse tables.
 
-For each preferred target region, MUSEtimates weighted energy arriving from other regions through that spreading function. It compares the target's own energy with the estimated masking energy, then passes the relationship through smooth logistic functions. This is a practical engineering approximation inspired by auditory-filter and masking concepts - not a complete physiological model of hearing.
+For each preferred target region, MUSE estimates weighted energy arriving from other regions through that spreading function. It compares the target's own energy with the estimated masking energy, then passes the relationship through smooth logistic functions. This is a practical engineering approximation inspired by auditory-filter and masking concepts - not a complete physiological model of hearing.
 
 ### 3. Preferred perceptual regions
 
