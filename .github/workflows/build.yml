@@ -65,14 +65,14 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $sdk = Join-Path $env:RUNNER_TEMP 'vst2sdk'
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /LD /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I "$sdk\include" muse_perceptual.cpp build/muse_avx.obj /link /OUT:release/muse_Perceptual.dll user32.lib comctl32.lib gdi32.lib
+          cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 /LD /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I "$sdk\include" muse_perceptual.cpp build/muse_avx.obj /link /OUT:release/MUSE_Perceptual_Focus.dll user32.lib comctl32.lib gdi32.lib
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify PE architecture and VST2 entry point
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $dll = 'release/muse_Perceptual.dll'
+          $dll = 'release/MUSE_Perceptual_Focus.dll'
           if (-not (Test-Path $dll)) { throw "DLL not found: $dll" }
           $headers = (& dumpbin /headers $dll | Out-String)
           if ($headers -notmatch '8664 machine') { throw 'DLL is not AMD64/PE32+.' }
@@ -83,6 +83,6 @@ jobs:
       - name: Upload VST2 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MUSE-ES-Perceptual-v1.3-AVX1-Windows-x64
-          path: release/muse_Perceptual.dll
+          name: MUSE-Perceptual-focus-v1.3-AVX1-Win-x64
+          path: release/MUSE_Perceptual_Focus.dll
           if-no-files-found: error
