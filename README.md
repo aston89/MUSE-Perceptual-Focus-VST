@@ -562,7 +562,7 @@ MUSE is designed to make some forms of spectral competition less intrusive. A sm
 ## Repository layout
 
 ```text
-MUSE-ES-Perceptual-Focus/
+MUSE-Perceptual-Focus-VST/
 ├── .github/
 │   └── workflows/
 │       └── build.yml
