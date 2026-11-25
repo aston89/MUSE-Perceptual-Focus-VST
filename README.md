@@ -22,14 +22,14 @@
 ## The index
 
 - [The opening frame](#the-opening-frame)
-- [What MUSE is](#whatMUSE-es-is)
+- [What MUSE is](#what-MUSE-es-is)
 - [The question behind the engine](#the-question-behind-the-engine)
 - [The project lineage](#the-project-lineage)
   - [CALP - content-aware loudness](#calp--content-aware-loudness)
   - [ASIP - local spatial opportunity](#asip--local-spatial-opportunity)
   - [DeFatiguer - perceptual stability over time](#defatiguer--perceptual-stability-over-time)
   - [SpectralGravity - macro spectral equilibrium](#spectralgravity--macro-spectral-equilibrium)
-  - [What converged in MUSE](#what-converged-inMUSE)
+  - [What converged in MUSE](#what-converged-in-MUSE)
 - [What it does - and what it deliberately does not](#what-it-does--and-what-it-deliberately-does-not)
 - [Inside the engine](#inside-the-engine)
   - [ERB analysis bank](#1-the-erb-analysis-bank)
