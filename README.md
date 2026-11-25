@@ -476,7 +476,7 @@ The plugin does not expose a double-precision VST processing callback. The build
 ## Installation and use with Equalizer APO
 
 1. Build the repository through GitHub Actions, or use a compatible Windows x64 build of the plugin.
-2. Download the workflow artifact containing `MUSE_ES_Perceptual.dll`.
+2. Download the workflow artifact containing `MUSE_Perceptual_Focus.dll`.
 3. Place the DLL in the VST2 location used by your Equalizer APO VST host/configuration.
 4. Rescan or restart the host so it loads the current DLL.
 5. Start with Factory Default or Natural Balance. Set Stereo Link to 0% unless linked behaviour is specifically desired.
@@ -490,7 +490,7 @@ The repository intentionally stays small:
 
 ```text
 .github/workflows/build.yml
-muse_es_perceptual.cpp
+muse_perceptual.cpp
 README.md
 ```
 
@@ -503,7 +503,7 @@ GitHub Actions performs the Windows x64 build:
 5. compiles and runs the DSP regression suite;
 6. builds the VST2 DLL;
 7. verifies PE32+ AMD64 and the `VSTPluginMain` export;
-8. uploads `MUSE_ES_Perceptual.dll` as an artifact.
+8. uploads `MUSE_Perceptual_Focus.dll` as an artifact.
 
 All MSVC compile steps explicitly use `/utf-8`. Preset menu em dashes are represented by C++ universal character escapes (`\u2014`) so the labels do not depend on the Windows machine's active ANSI code page.
 
@@ -513,11 +513,11 @@ To run the same core regression suite locally from an x64 Native Tools Command P
 New-Item -ItemType Directory -Force build | Out-Null
 
 cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 `
-  /c /DMUSE_AVX_KERNEL /arch:AVX muse_es_perceptual.cpp `
+  /c /DMUSE_AVX_KERNEL /arch:AVX muse_perceptual.cpp `
   /Fo:build/muse_es_avx.obj
 
 cl /nologo /std:c++17 /O2 /W4 /permissive- /EHsc /utf-8 `
-  /DMUSE_SELF_TEST muse_es_perceptual.cpp build/muse_es_avx.obj `
+  /DMUSE_SELF_TEST muse_perceptual.cpp build/muse_es_avx.obj `
   /Fe:build/muse_es_tests.exe
 
 .\build\muse_es_tests.exe
@@ -566,7 +566,7 @@ MUSE-ES-Perceptual-Focus/
 ├── .github/
 │   └── workflows/
 │       └── build.yml
-├── muse_es_perceptual.cpp
+├── muse_perceptual.cpp
 └── README.md
 ```
 
