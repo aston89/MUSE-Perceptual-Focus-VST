@@ -1,5 +1,5 @@
 /*
- * MUSE Perceptual Focus v1.3.1 (AVX1, block-batched stereo workers, parallel CSR decisions)
+ * MUSE Perceptual Focus v1.3.2 (FTZ/DAZ denormal protection, AVX1, block-batched stereo workers, parallel CSR decisions)
  * Real-time, subtractive, preference-guided self-masking processor.
  * Build the baseline source normally. Compile this same file once more with
  * /DMUSE_AVX_KERNEL /arch:AVX to produce the optional AVX1 kernel object.
@@ -86,6 +86,12 @@ extern "C" void muse_avx_update_powers(
 #include <new>
 #include <vector>
 #include <complex>
+#if defined(_M_IX86) || defined(_M_X64) || defined(__i386__) || defined(__x86_64__)
+#include <xmmintrin.h>
+#define MUSE_HAS_MXCSR 1
+#else
+#define MUSE_HAS_MXCSR 0
+#endif
 #if defined(_MSC_VER)
 #include <intrin.h>
 #elif defined(__GNUC__) || defined(__clang__)
@@ -104,6 +110,38 @@ extern "C" void muse_avx_update_powers(
     float attackAlpha, float releaseAlpha) noexcept;
 
 namespace muse_perceptual {
+
+#if MUSE_HAS_MXCSR
+constexpr unsigned int kMxcsrDazMask = 1u << 6;
+constexpr unsigned int kMxcsrFtzMask = 1u << 15;
+#endif
+
+// Flush denormal inputs/results while this thread performs audio DSP. MXCSR is
+// per-thread, so every persistent worker must establish this mode independently.
+// The scoped form is used on host-owned callback threads and restores their
+// incoming floating-point environment before returning to the host.
+class ScopedDenormalMode final {
+public:
+    ScopedDenormalMode() noexcept {
+#if MUSE_HAS_MXCSR
+        previousMxcsr_ = _mm_getcsr();
+        _mm_setcsr(previousMxcsr_ | kMxcsrDazMask | kMxcsrFtzMask);
+        active_ = true;
+#endif
+    }
+    ~ScopedDenormalMode() noexcept {
+#if MUSE_HAS_MXCSR
+        if (active_) _mm_setcsr(previousMxcsr_);
+#endif
+    }
+    ScopedDenormalMode(const ScopedDenormalMode&) = delete;
+    ScopedDenormalMode& operator=(const ScopedDenormalMode&) = delete;
+private:
+#if MUSE_HAS_MXCSR
+    unsigned int previousMxcsr_ = 0;
+    bool active_ = false;
+#endif
+};
 
 inline bool cpuSupportsAvx() noexcept {
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
@@ -1312,6 +1350,62 @@ muse_perceptual::Parameters strongParams(int mode = 2) {
 int main() {
     using namespace muse_perceptual;
     std::cout << "AVX1 runtime dispatch: " << (cpuSupportsAvx() ? "available" : "baseline fallback") << '\n';
+#if MUSE_HAS_MXCSR
+    {
+        const unsigned int originalMxcsr = _mm_getcsr();
+        const unsigned int baselineMxcsr = originalMxcsr & ~(kMxcsrDazMask | kMxcsrFtzMask);
+        _mm_setcsr(baselineMxcsr);
+        bool denormalFlagsEnabled = false;
+        bool dazFlushesSubnormalInputs = false;
+        bool ftzFlushesSubnormalResults = false;
+        {
+            ScopedDenormalMode denormalMode;
+            const unsigned int activeMxcsr = _mm_getcsr();
+            denormalFlagsEnabled = (activeMxcsr & (kMxcsrDazMask | kMxcsrFtzMask)) ==
+                                   (kMxcsrDazMask | kMxcsrFtzMask);
+
+            // Amplify the smallest subnormal to a normal-sized result: if DAZ
+            // is active, the subnormal input is treated as zero before multiply.
+            const uint32_t smallestSubnormalBits = 1u;
+            float smallestSubnormal = 0.0f;
+            std::memcpy(&smallestSubnormal, &smallestSubnormalBits, sizeof(smallestSubnormal));
+            volatile float subnormalInput = smallestSubnormal;
+            volatile float amplifiedInput = subnormalInput * 1.0e30f;
+            dazFlushesSubnormalInputs = amplifiedInput == 0.0f;
+
+            // Halving the smallest normal float produces a subnormal result;
+            // FTZ should write zero instead of retaining that tiny value.
+            volatile float smallestNormal = std::numeric_limits<float>::min();
+            volatile float underflowResult = smallestNormal * 0.5f;
+            ftzFlushesSubnormalResults = underflowResult == 0.0f;
+        }
+        const unsigned int restoredMxcsr = _mm_getcsr();
+        _mm_setcsr(originalMxcsr);
+        check(denormalFlagsEnabled, "DSP denormal guard enables both DAZ and FTZ");
+        check(dazFlushesSubnormalInputs, "DAZ treats subnormal input operands as zero");
+        check(ftzFlushesSubnormalResults, "FTZ flushes subnormal floating-point results to zero");
+        check(restoredMxcsr == baselineMxcsr, "scoped denormal guard restores the caller MXCSR exactly");
+    }
+    {
+        unsigned int workerOriginalMxcsr = 0;
+        unsigned int workerActiveMxcsr = 0;
+        unsigned int workerRestoredMxcsr = 0;
+        std::thread worker([&]() noexcept {
+            workerOriginalMxcsr = _mm_getcsr();
+            {
+                ScopedDenormalMode denormalMode;
+                workerActiveMxcsr = _mm_getcsr();
+            }
+            workerRestoredMxcsr = _mm_getcsr();
+        });
+        worker.join();
+        check((workerActiveMxcsr & (kMxcsrDazMask | kMxcsrFtzMask)) ==
+              (kMxcsrDazMask | kMxcsrFtzMask),
+              "denormal mode is independently enabled on a worker thread");
+        check(workerRestoredMxcsr == workerOriginalMxcsr,
+              "worker thread restores its own MXCSR after the DSP scope");
+    }
+#endif
     check(resolutionBandCount(0) == 32 && resolutionBandCount(1) == 64 &&
           resolutionBandCount(2) == 128 && resolutionBandCount(3) == 256 &&
           resolutionBandCount(4) == 512,
@@ -1825,7 +1919,7 @@ constexpr int32_t kVstEffectCanDo = 51;
 constexpr int32_t kVstEffectGetVstVersion = 58;
 constexpr int32_t kVstHostGetVstVersion = 1;
 constexpr int32_t kVstVersion24 = 2400;
-constexpr int32_t kPluginVersion = 1301;
+constexpr int32_t kPluginVersion = 1302;
 // The 15-parameter layout and normalized ranges are unchanged from v1.2;
 // retain MESA so existing host states remain compatible.
 constexpr int32_t kPluginUniqueId = static_cast<int32_t>(VST_FOURCC('M', 'E', 'S', 'A'));
@@ -1838,7 +1932,7 @@ constexpr int kEditorWidth = 1120;
 constexpr int kEditorHeight = 440;
 constexpr int kEditorFirstRowY = 112;
 constexpr int kEditorRowHeight = 39;
-constexpr wchar_t kEditorClassName[] = L"muse_Perceptual_v13_Editor";
+constexpr wchar_t kEditorClassName[] = L"muse_Perceptual_v132_Editor";
 
 constexpr std::array<const wchar_t*, kParameterCount> kParameterNamesWide = {
     L"Focus Amount", L"Mask Sensitivity", L"Sigmoid Softness", L"Maximum Reduction",
@@ -1951,6 +2045,9 @@ private:
     static unsigned __stdcall channelWorkerProc(void* context) noexcept {
         auto* worker = static_cast<ChannelWorker*>(context);
         if (worker == nullptr) return 0;
+        // The channel worker owns the long-running filter-bank/envelope DSP.
+        // Set FTZ/DAZ once for this worker thread, including its entire lifetime.
+        ScopedDenormalMode denormalMode;
         for (;;) {
             const DWORD wr = WaitForSingleObject(worker->workEvent, INFINITE);
             if (wr != WAIT_OBJECT_0) break;
@@ -1972,6 +2069,9 @@ private:
     static unsigned __stdcall decisionWorkerProc(void* context) noexcept {
         auto* worker = static_cast<DecisionWorker*>(context);
         if (worker == nullptr) return 0;
+        // Decision math also runs on a separate persistent thread. MXCSR is
+        // thread-local, so give these workers the same denormal protection.
+        ScopedDenormalMode denormalMode;
         for (;;) {
             const DWORD wr = WaitForSingleObject(worker->workEvent, INFINITE);
             if (wr != WAIT_OBJECT_0) break;
@@ -2235,7 +2335,7 @@ private:
         HWND old = editorWindow_.load(std::memory_order_acquire);
         if (old != nullptr && IsWindow(old)) return true;
         if (!registerEditorClass()) return false;
-        HWND w = CreateWindowExW(0, kEditorClassName, L"MUSE Perceptual Focus v1.3",
+        HWND w = CreateWindowExW(0, kEditorClassName, L"MUSE Perceptual Focus v1.3.2",
             WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
             0, 0, kEditorWidth, kEditorHeight, parent, nullptr, gModuleInstance, this);
         if (w == nullptr) return false;
@@ -2429,13 +2529,13 @@ private:
             p.body = 0.22; p.vocal = 0.62; p.presence = 0.42;
             p.articulation = 0.25; p.air = 0.08; p.focusWidthBark = 1.35;
             p.responsiveness = 0.72; p.resolutionMode = 1; p.detectorRateHz = 750.0; break;
-        case 8: // Baudelaire Choice: maximum-resolution, neutral-priority, fast response.
+        case 8: // Baudelaire Choice: equal perceptual-region priorities, maximum analysis and responsiveness.
             p.amount = 1.0; p.sensitivity = 1.0; p.softness = 1.0;
             p.maximumReductionDb = 9.0; p.energyPreference = 0.50;
             p.body = 0.50; p.vocal = 0.50; p.presence = 0.50;
             p.articulation = 0.50; p.air = 0.50; p.focusWidthBark = 0.35;
-            p.responsiveness = 1.0; p.resolutionMode = 4; p.stereoLink = 0.0;
-            p.detectorRateHz = 1500.0; break;
+            p.responsiveness = 1.0; p.resolutionMode = 4;
+            p.stereoLink = 0.0; p.detectorRateHz = 1500.0; break;
         default: // Factory default: unchanged v1.0 parameter values.
             break;
         }
@@ -2470,6 +2570,7 @@ private:
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, 7, L"Dense Mix \u2014 512 bands / 750 Hz");
         AppendMenuW(menu, MF_STRING, 8, L"Low CPU \u2014 64 bands / 750 Hz");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, 9, L"Baudelaire Choice \u2014 512 bands / 1500 Hz");
         RECT r{}; GetWindowRect(GetDlgItem(owner, kEditorPresetButtonId), &r);
         const UINT chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
@@ -2632,6 +2733,9 @@ private:
             }
             return;
         }
+        // The host may invoke processBlock on any of its audio threads. Protect
+        // the synchronous/fallback path as well, then restore the host's MXCSR.
+        ScopedDenormalMode denormalMode;
         self->engine_.setParameters(self->makeParameters());
         const auto submit = self->parallelWorkerReady_ ? &submitChannel : nullptr;
         const auto wait = self->parallelWorkerReady_ ? &waitChannels : nullptr;
