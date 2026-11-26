@@ -90,7 +90,7 @@ The project is deliberately not a general-purpose mastering chain. It has no lou
 | Property | Implementation |
 |---|---|
 | Project | MUSE - Perceptual Focus |
-| Version | 1.3.1 |
+| Version | 1.3.2 |
 | Format | Windows x64 VST2 |
 | Host target | Equalizer APO; other compatible VST2 hosts may work |
 | Processing | Stereo, 32-bit floating point |
