@@ -1,5 +1,5 @@
 /*
- * MUSE Perceptual Focus v1.3.2 (FTZ/DAZ denormal protection, AVX1, block-batched stereo workers, parallel CSR decisions)
+ * MUSE Perceptual Focus v1.3.3 (FTZ/DAZ denormal protection, AVX1, block-batched stereo workers, parallel CSR decisions, unified worker priority)
  * Real-time, subtractive, preference-guided self-masking processor.
  * Build the baseline source normally. Compile this same file once more with
  * /DMUSE_AVX_KERNEL /arch:AVX to produce the optional AVX1 kernel object.
@@ -1919,33 +1919,59 @@ constexpr int32_t kVstEffectCanDo = 51;
 constexpr int32_t kVstEffectGetVstVersion = 58;
 constexpr int32_t kVstHostGetVstVersion = 1;
 constexpr int32_t kVstVersion24 = 2400;
-constexpr int32_t kPluginVersion = 1302;
-// The 15-parameter layout and normalized ranges are unchanged from v1.2;
+constexpr int32_t kPluginVersion = 1303;
+// v1.3.3 adds a 16th parameter (Worker Priority) for unified thread priority control.
+// The original 15-parameter layout and normalized ranges are unchanged from v1.2;
 // retain MESA so existing host states remain compatible.
 constexpr int32_t kPluginUniqueId = static_cast<int32_t>(VST_FOURCC('M', 'E', 'S', 'A'));
-constexpr std::size_t kParameterCount = 15;
+constexpr std::size_t kParameterCount = 16;
 constexpr UINT kEditorRefreshMessage = WM_APP + 0x62;
 constexpr int kEditorSliderIdBase = 5200;
 constexpr int kEditorPresetButtonId = 5400;
-constexpr int kParametersPerColumn = 8;
+constexpr int kParametersPerColumn = 8; // 16 parameters / 2 columns = 8 per column
 constexpr int kEditorWidth = 1120;
-constexpr int kEditorHeight = 440;
+constexpr int kEditorHeight = 480; // Increased to accommodate 16 parameters (2 rows of 8)
 constexpr int kEditorFirstRowY = 112;
 constexpr int kEditorRowHeight = 39;
-constexpr wchar_t kEditorClassName[] = L"muse_Perceptual_v132_Editor";
+constexpr wchar_t kEditorClassName[] = L"muse_Perceptual_v133_Editor";
+
+// Worker priority levels: 0=Idle, 1=Below Normal, 2=Normal, 3=Above Normal, 4=Highest
+constexpr int kWorkerPriorityLevels = 5;
+constexpr std::array<const wchar_t*, kWorkerPriorityLevels> kWorkerPriorityNames = {
+    L"Idle", L"Below Normal", L"Normal", L"Above Normal", L"Highest"
+};
+constexpr std::array<int, kWorkerPriorityLevels> kWorkerPriorityValues = {
+    THREAD_PRIORITY_IDLE, THREAD_PRIORITY_BELOW_NORMAL, THREAD_PRIORITY_NORMAL,
+    THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST
+};
+
+inline int normalizedToWorkerPriority(float v) noexcept {
+    v = clampf(v, 0.0f, 1.0f);
+    if (v < 0.1f) return 0;
+    if (v < 0.3f) return 1;
+    if (v < 0.5f) return 2;
+    if (v < 0.7f) return 3;
+    return 4;
+}
+inline float workerPriorityToNormalized(int level) noexcept {
+    level = std::max(0, std::min(4, level));
+    return static_cast<float>(level) * 0.25f;
+}
 
 constexpr std::array<const wchar_t*, kParameterCount> kParameterNamesWide = {
     L"Focus Amount", L"Mask Sensitivity", L"Sigmoid Softness", L"Maximum Reduction",
     L"Energy Preference", L"Body", L"Vocal", L"Presence", L"Articulation", L"Air",
-    L"Focus Width", L"Responsiveness", L"Band Resolution", L"Stereo Link", L"Detector Update"
+    L"Focus Width", L"Responsiveness", L"Band Resolution", L"Stereo Link", L"Detector Update",
+    L"Worker Priority"
 };
 constexpr std::array<const char*, kParameterCount> kParameterNames = {
     "Focus Amount", "Mask Sensitivity", "Sigmoid Softness", "Maximum Reduction",
     "Energy Preference", "Body", "Vocal", "Presence", "Articulation", "Air",
-    "Focus Width", "Responsiveness", "Band Resolution", "Stereo Link", "Detector Update"
+    "Focus Width", "Responsiveness", "Band Resolution", "Stereo Link", "Detector Update",
+    "Worker Priority"
 };
 constexpr std::array<const char*, kParameterCount> kParameterLabels = {
-    "%", "%", "%", "dB", "%", "%", "%", "%", "%", "%", "Bark", "%", "bands", "%", "Hz"
+    "%", "%", "%", "dB", "%", "%", "%", "%", "%", "%", "Bark", "%", "bands", "%", "Hz", "level"
 };
 
 inline float clamp01f(float x) noexcept {
@@ -2296,6 +2322,7 @@ private:
         parameters_[12].store(0.25f); // 64 bands default (five discrete resolutions)
         parameters_[13].store(0.0f); // independent L/R by default
         parameters_[14].store(normalizeLinear(1000.0, 250.0, 1500.0)); // 1 kHz default detector cadence
+        parameters_[15].store(workerPriorityToNormalized(3)); // Above Normal (matches v1.3.2 behavior)
     }
     Parameters makeParameters() const noexcept {
         Parameters p;
