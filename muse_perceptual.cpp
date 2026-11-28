@@ -2395,7 +2395,7 @@ private:
         HWND old = editorWindow_.load(std::memory_order_acquire);
         if (old != nullptr && IsWindow(old)) return true;
         if (!registerEditorClass()) return false;
-        HWND w = CreateWindowExW(0, kEditorClassName, L"MUSE Perceptual Focus v1.3.2",
+        HWND w = CreateWindowExW(0, kEditorClassName, L"MUSE Perceptual Focus v1.3.3",
             WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
             0, 0, kEditorWidth, kEditorHeight, parent, nullptr, gModuleInstance, this);
         if (w == nullptr) return false;
