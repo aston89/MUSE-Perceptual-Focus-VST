@@ -100,8 +100,8 @@ The project is deliberately not a general-purpose mastering chain. It has no lou
 | Stereo Link | 0–100% |
 | SIMD | AVX1, runtime detected; scalar fallback |
 | VST unique ID | `MESA` |
-| VST version integer | `1300` |
-| Parameters | 15 |
+| VST version integer | `1303` |
+| Parameters | 16 |
 
 ## The question behind the engine
 
@@ -318,7 +318,7 @@ The feature controls how masking decisions are linked. It is not a stereo-width 
 
 ## The controls
 
-The plugin exposes 15 parameters. Factory defaults are conservative starting points; every preset remains editable.
+The plugin exposes 16 parameters. Factory defaults are conservative starting points; every preset remains editable.
 
 | Control | Range / choices | Factory default | Role |
 |---|---|---:|---|
@@ -337,6 +337,9 @@ The plugin exposes 15 parameters. Factory defaults are conservative starting poi
 | Band Resolution | 32 / 64 / 128 / 256 / 512 | 64 | Number of ERB analysis regions |
 | Stereo Link | 0–100% | 0% | Blend between independent and linked decisions |
 | Detector Update | 250–1500 Hz | 1000 Hz | Requested masking-decision refresh rate |
+| Worker Priority | Idle / Below Normal / Normal / Above Normal / Highest / Realtime | Above Normal | Priority control for MUSE worker threads |
+
+**Realtime** also raises the priority class of the host process to REALTIME_PRIORITY_CLASS, not only the MUSE worker threads. Use with caution.
 
 ### How to think about the main controls
 
