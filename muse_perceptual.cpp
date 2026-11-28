@@ -2914,3 +2914,5 @@ VSTPluginMain(vst_host_callback_t callback) {
 
 #endif // MUSE_SELF_TEST
 
+#endif // MUSE_AVX_KERNEL
+
