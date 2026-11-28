@@ -1478,7 +1478,7 @@ int main() {
     check(std::abs(lowRateEngine->detectorUpdateRateHz() - 250.0) < 0.5,
           "250 Hz detector rate remains available at 192 kHz sample rate");
 
-    auto identity = makeTestEngine();
+    auto identity = makeTestEngine(false); // exercise the baseline path at maximum resolution
     if (!identity) { std::cerr << "[FATAL] Could not allocate identity test engine.\n"; return 2; }
     check(identity->prepare(48000.0), "prepare all resolutions at 48 kHz");
     Parameters neutral;
@@ -1525,10 +1525,9 @@ int main() {
         double peak = 0.0;
         const int renderSamples = mode >= 4 ? 12000 : (mode >= 3 ? 24000 : 48000 * 2);
         for (int n = 0; n < renderSamples; ++n) {
-            const float t = static_cast<float>(n) / 48000.0f;
-            const float x = 0.18f * std::sin(static_cast<float>(2.0 * kPi * 1000.0 * t)) +
-                            0.50f * std::sin(static_cast<float>(2.0 * kPi * 1450.0 * t)) +
-                            0.11f * std::sin(static_cast<float>(2.0 * kPi * 3600.0 * t));
+            const float x = 0.18f * std::sin(static_cast<float>(2.0 * kPi * 1000.0 * n / 48000.0)) +
+                            0.50f * std::sin(static_cast<float>(2.0 * kPi * 1450.0 * n / 48000.0)) +
+                            0.11f * std::sin(static_cast<float>(2.0 * kPi * 3600.0 * n / 48000.0));
             float yL = 0.0f, yR = 0.0f;
             engine->processStereo(x, x, yL, yR);
             peak = std::max(peak, std::abs(static_cast<double>(yL)));
@@ -1935,27 +1934,32 @@ constexpr int kEditorFirstRowY = 112;
 constexpr int kEditorRowHeight = 39;
 constexpr wchar_t kEditorClassName[] = L"muse_Perceptual_v133_Editor";
 
-// Worker priority levels: 0=Idle, 1=Below Normal, 2=Normal, 3=Above Normal, 4=Highest
-constexpr int kWorkerPriorityLevels = 5;
+// Worker priority levels: Idle, Below Normal, Normal, Above Normal, Highest, Realtime
+constexpr int kWorkerPriorityLevels = 6;
 constexpr std::array<const wchar_t*, kWorkerPriorityLevels> kWorkerPriorityNames = {
-    L"Idle", L"Below Normal", L"Normal", L"Above Normal", L"Highest"
+    L"Idle", L"Below Normal", L"Normal", L"Above Normal", L"Highest", L"Realtime"
 };
 constexpr std::array<int, kWorkerPriorityLevels> kWorkerPriorityValues = {
     THREAD_PRIORITY_IDLE, THREAD_PRIORITY_BELOW_NORMAL, THREAD_PRIORITY_NORMAL,
-    THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST
+    THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST, THREAD_PRIORITY_TIME_CRITICAL
 };
 
 inline int normalizedToWorkerPriority(float v) noexcept {
     v = clampf(v, 0.0f, 1.0f);
-    if (v < 0.1f) return 0;
-    if (v < 0.3f) return 1;
-    if (v < 0.5f) return 2;
-    if (v < 0.7f) return 3;
-    return 4;
+    int level = static_cast<int>(std::lround(v * static_cast<float>(kWorkerPriorityLevels - 1)));
+    return std::max(0, std::min(kWorkerPriorityLevels - 1, level));
 }
 inline float workerPriorityToNormalized(int level) noexcept {
-    level = std::max(0, std::min(4, level));
-    return static_cast<float>(level) * 0.25f;
+    level = std::max(0, std::min(kWorkerPriorityLevels - 1, level));
+    return static_cast<float>(level) / static_cast<float>(kWorkerPriorityLevels - 1);
+}
+inline int workerPriorityNameToLevel(const wchar_t* name) noexcept {
+    if (name == nullptr) return -1;
+    for (int i = 0; i < kWorkerPriorityLevels; ++i) {
+        if (_wcsicmp(name, kWorkerPriorityNames[static_cast<std::size_t>(i)]) == 0)
+            return i;
+    }
+    return -1;
 }
 
 constexpr std::array<const wchar_t*, kParameterCount> kParameterNamesWide = {
@@ -2025,8 +2029,12 @@ public:
         preparedRate_.store(initialPrepared ? 44100.0 : 0.0, std::memory_order_release);
         prepared_.store(initialPrepared, std::memory_order_release);
         startParallelWorkers();
+        applyWorkerPriority();
     }
     ~MuseEsPerceptualPlugin() noexcept {
+        if (savedProcessPriorityClass_ != 0)
+            SetPriorityClass(GetCurrentProcess(), savedProcessPriorityClass_);
+        savedProcessPriorityClass_ = 0;
         stopParallelWorkers();
         closeEditor();
     }
@@ -2306,6 +2314,31 @@ private:
         (void)self->workers_[1].completedGeneration.load(std::memory_order_acquire);
     }
 
+    void applyWorkerPriority() noexcept {
+        const int level = normalizedToWorkerPriority(
+            parameters_[15].load(std::memory_order_acquire));
+        const int priority = kWorkerPriorityValues[static_cast<std::size_t>(level)];
+        HANDLE process = GetCurrentProcess();
+        if (level == kWorkerPriorityLevels - 1) {
+            if (savedProcessPriorityClass_ == 0) {
+                const DWORD currentClass = GetPriorityClass(process);
+                if (SetPriorityClass(process, REALTIME_PRIORITY_CLASS))
+                    savedProcessPriorityClass_ = currentClass;
+            } else {
+                SetPriorityClass(process, REALTIME_PRIORITY_CLASS);
+            }
+        } else if (savedProcessPriorityClass_ != 0) {
+            SetPriorityClass(process, savedProcessPriorityClass_);
+            savedProcessPriorityClass_ = 0;
+        }
+        for (auto& worker : workers_) {
+            if (worker.thread != nullptr) SetThreadPriority(worker.thread, priority);
+            for (auto& decision : worker.decisionWorkers) {
+                if (decision.thread != nullptr) SetThreadPriority(decision.thread, priority);
+            }
+        }
+    }
+
     void setDefaults() noexcept {
         parameters_[0].store(normalizeLinear(42.0, 0.0, 100.0));
         parameters_[1].store(normalizeLinear(58.0, 0.0, 100.0));
@@ -2393,6 +2426,7 @@ private:
         case 10: std::swprintf(dst, cap, L"%.2f Bark", denormalize(n, 0.35, 4.0)); break;
         case 12: std::swprintf(dst, cap, L"%d bands", resolutionBandCount(normalizedToResolution(static_cast<float>(n)))); break;
         case 14: std::swprintf(dst, cap, L"%.0f Hz", denormalize(n, 250.0, 1500.0)); break;
+        case 15: std::swprintf(dst, cap, L"%ls", kWorkerPriorityNames[static_cast<std::size_t>(normalizedToWorkerPriority(static_cast<float>(n)))]); break;
         default: std::swprintf(dst, cap, L"%.1f %%", n * 100.0); break;
         }
         dst[cap - 1] = L'\0';
@@ -2406,6 +2440,13 @@ private:
         case 10: std::snprintf(text, sizeof(text), "%.2f", denormalize(n, 0.35, 4.0)); break;
         case 12: std::snprintf(text, sizeof(text), "%d", resolutionBandCount(normalizedToResolution(static_cast<float>(n)))); break;
         case 14: std::snprintf(text, sizeof(text), "%.0f", denormalize(n, 250.0, 1500.0)); break;
+        case 15: {
+            const int level = normalizedToWorkerPriority(static_cast<float>(n));
+            char name[32]{};
+            std::wcstombs(name, kWorkerPriorityNames[static_cast<std::size_t>(level)], sizeof(name));
+            std::snprintf(text, sizeof(text), "%s", name);
+            break;
+        }
         default: std::snprintf(text, sizeof(text), "%.1f", n * 100.0); break;
         }
         copyVstString(dst, VST_BUFFER_SIZE_PARAM_VALUE, text);
@@ -2438,6 +2479,10 @@ private:
             SendMessageW(slider, TBM_SETRANGE, TRUE, MAKELPARAM(0, 1000));
             SendMessageW(slider, TBM_SETPAGESIZE, 0, 10);
             if (i == 12) SendMessageW(slider, TBM_SETTICFREQ, 500, 0);
+            if (i == 15) {
+                SendMessageW(slider, TBM_SETRANGEMAX, TRUE, 1000);
+                SendMessageW(slider, TBM_SETTICFREQ, 200, 0);
+            }
             HWND value = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", style | WS_TABSTOP | ES_RIGHT | ES_AUTOHSCROLL,
                 x + 452, y + 3, 96, 25, w,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kEditorSliderIdBase + 100 + static_cast<int>(i))),
@@ -2471,8 +2516,14 @@ private:
             v = resolutionToNormalized(mode);
             if (sliders_[i] != nullptr)
                 SendMessageW(sliders_[i], TBM_SETPOS, TRUE, static_cast<LPARAM>(std::lround(v * 1000.0f)));
+        } else if (i == 15) {
+            const int level = normalizedToWorkerPriority(v);
+            v = workerPriorityToNormalized(level);
+            if (sliders_[i] != nullptr)
+                SendMessageW(sliders_[i], TBM_SETPOS, TRUE, static_cast<LPARAM>(std::lround(v * 1000.0f)));
         }
         parameters_[i].store(v, std::memory_order_release);
+        if (i == 15) applyWorkerPriority();
         if (host_ != nullptr) host_(&effect_, 0, static_cast<int32_t>(i), 0, nullptr, v);
         if (valueLabels_[i] != nullptr) {
             wchar_t text[64]{}; formatValue(i, text, 64); SetWindowTextW(valueLabels_[i], text);
@@ -2487,7 +2538,6 @@ private:
             const int mode = resolutionModeFromBandCount(value);
             normalized = resolutionToNormalized(mode);
         } else if (i == 14) normalized = normalizeLinear(std::clamp(value, 250.0, 1500.0), 250.0, 1500.0);
-        else normalized = normalizeLinear(std::clamp(value, 0.0, 100.0), 0.0, 100.0);
         parameters_[i].store(normalized, std::memory_order_release);
         if (i == 12 && sliders_[i] != nullptr)
             SendMessageW(sliders_[i], TBM_SETPOS, TRUE,
@@ -2500,6 +2550,28 @@ private:
         if (i >= kParameterCount || valueLabels_[i] == nullptr) return;
         wchar_t buffer[64]{};
         GetWindowTextW(valueLabels_[i], buffer, 64);
+        if (i == 15) {
+            wchar_t* begin = buffer;
+            while (*begin == L' ' || *begin == L'\t') ++begin;
+            wchar_t* end = begin + std::wcslen(begin);
+            while (end > begin && (end[-1] == L' ' || end[-1] == L'\t')) --end;
+            *end = L'\0';
+            const int level = workerPriorityNameToLevel(begin);
+            if (level >= 0) {
+                const float normalized = workerPriorityToNormalized(level);
+                parameters_[i].store(normalized, std::memory_order_release);
+                applyWorkerPriority();
+                if (host_ != nullptr)
+                    host_(&effect_, 0, static_cast<int32_t>(i), 0, nullptr, normalized);
+                if (sliders_[i] != nullptr)
+                    SendMessageW(sliders_[i], TBM_SETPOS, TRUE,
+                        static_cast<LPARAM>(std::lround(normalized * 1000.0f)));
+                syncControls();
+                return;
+            }
+            syncControls();
+            return;
+        }
         for (wchar_t* c = buffer; *c != L'\0'; ++c) if (*c == L',') *c = L'.';
         wchar_t* end = nullptr;
         const double value = std::wcstod(buffer, &end);
@@ -2523,9 +2595,10 @@ private:
         case 2: // Vocal Center: preserve the core vocal band and trim maskers around it.
             p.amount = 0.56; p.sensitivity = 0.68; p.softness = 0.68;
             p.maximumReductionDb = 3.8; p.energyPreference = 0.88;
+           
             p.body = 0.16; p.vocal = 0.96; p.presence = 0.46;
             p.articulation = 0.20; p.air = 0.03; p.focusWidthBark = 0.95;
-            p.responsiveness = 0.78; p.resolutionMode = 3; p.detectorRateHz = 1250.0; break;
+            p.responsiveness =  0.78; p.resolutionMode = 3; p.detectorRateHz = 1250.0; break;
         case 3: // Speech Intelligibility: upper vocal formants and consonant detail.
             p.amount = 0.60; p.sensitivity = 0.72; p.softness = 0.54;
             p.maximumReductionDb = 4.2; p.energyPreference = 0.82;
@@ -2732,9 +2805,14 @@ private:
         auto* self = fromEffect(e); if (self == nullptr || i >= kParameterCount) return;
         v = clamp01f(v);
         if (i == 12) v = resolutionToNormalized(normalizedToResolution(v));
+        else if (i == 15) {
+            const int level = normalizedToWorkerPriority(v);
+            v = workerPriorityToNormalized(level);
+        }
         const float previous = self->parameters_[i].load(std::memory_order_relaxed);
         if (std::abs(previous - v) <= 1.0e-6f) return;
         self->parameters_[i].store(v, std::memory_order_release);
+        if (i == 15) self->applyWorkerPriority();
         self->requestEditorRefresh();
     }
     static float VST_FUNCTION_INTERFACE getParameter(vst_effect_t* e, uint32_t i) noexcept {
@@ -2808,6 +2886,7 @@ private:
     std::array<HWND, kParameterCount> valueLabels_{};
     std::array<ChannelWorker, 2> workers_{};
     bool parallelWorkerReady_ = false;
+    DWORD savedProcessPriorityClass_ = 0;
     inline static vst_rect_t editorRect_{0, 0, kEditorHeight, kEditorWidth};
     int32_t blockSize_ = VST_DEFAULT_BLOCK_SIZE;
     std::atomic<double> preparedRate_{0.0};
@@ -2834,6 +2913,4 @@ VSTPluginMain(vst_host_callback_t callback) {
 }
 
 #endif // MUSE_SELF_TEST
-
-#endif // MUSE_AVX_KERNEL
 
